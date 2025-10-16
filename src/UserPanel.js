@@ -4,39 +4,24 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { generateClient } from 'aws-amplify/api';
 import * as mutations from './graphql/mutations';
-import * as subscriptions from './graphql/subscriptions';
-import * as queries from './graphql/queries'; // getPlayer sorgusu için bu gerekli
+import * as queries from './graphql/queries';
 import { Amplify } from 'aws-amplify';
 import awsExports from './aws-exports';
+import { useQuizData } from './hooks/useQuizData'; // Yeni hook'u import et
 
 Amplify.configure(awsExports);
 const client = generateClient();
 
 const UserPanel = () => {
   const { quizId } = useParams();
+  const { quizState, currentQuestion, leaderboard } = useQuizData(quizId); // Hook'u kullan
 
   const [nickname, setNickname] = useState('');
   const [player, setPlayer] = useState(null);
-  const [quizState, setQuizState] = useState(null);
-  const [currentQuestion, setCurrentQuestion] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
   const [selectedOption, setSelectedOption] = useState(null);
-  const [leaderboard, setLeaderboard] = useState([]);
 
-  // --- LİDERLİK TABLOSU FONKSİYONU (VERİMLİ VERSİYON) ---
-  const fetchLeaderboard = async () => {
-    try {
-      const playersData = await client.graphql({
-        query: queries.playersByQuizID,
-        variables: { quizID: quizId, sortDirection: 'DESC' }
-      });
-      const sortedPlayers = playersData.data.playersByQuizID.items;
-      setLeaderboard(sortedPlayers);
-    } catch (e) {
-      console.error("UserPanel `playersByQuizID` sorgusu BAŞARISIZ OLDU", e);
-    }
-  };
-
+  // Oyuncu katılımı ve localStorage yönetimi bu bileşene özel olduğu için burada kalır.
   const handleJoinQuiz = async (e) => {
     e.preventDefault();
     if (!nickname.trim()) return;
@@ -52,115 +37,59 @@ const UserPanel = () => {
     }
   };
 
-  // --- ANA useEffect KANCASI (GÜNCELLENMİŞ VE DOĞRULAMA EKLENMİŞ HALİ) ---
   useEffect(() => {
-    // Bu fonksiyon, localStorage'daki oyuncunun veritabanında hala var olup olmadığını kontrol eder.
     const validateAndSetPlayer = async () => {
       const savedPlayerData = localStorage.getItem(`quiz-${quizId}-player`);
-      if (!savedPlayerData) {
-        // Eğer localStorage'da kayıt yoksa, hiçbir şey yapma. Kullanıcı isim girecek.
-        return;
-      }
-
-      const savedPlayer = JSON.parse(savedPlayerData);
+      if (!savedPlayerData) return;
       
+      const savedPlayer = JSON.parse(savedPlayerData);
       try {
-        console.log(`Doğrulanıyor: localStorage'daki oyuncu (ID: ${savedPlayer.id}) veritabanında var mı?`);
-        // localStorage'dan gelen ID ile veritabanından oyuncuyu getirmeyi dene
         const response = await client.graphql({
           query: queries.getPlayer,
           variables: { id: savedPlayer.id }
         });
-
         if (response.data.getPlayer) {
-          // BAŞARILI: Oyuncu veritabanında bulundu.
-          console.log("Oyuncu geçerli. Durum ayarlanıyor.");
-          setPlayer(response.data.getPlayer); // En güncel bilgiyi (örn: skor) veritabanından al
+          setPlayer(response.data.getPlayer);
         } else {
-          // BAŞARISIZ: Oyuncu veritabanında bulunamadı (silinmiş).
-          console.log("Hayalet oyuncu tespit edildi. localStorage temizleniyor.");
-          localStorage.removeItem(`quiz-${quizId}-player`); // Geçersiz veriyi temizle
+          localStorage.removeItem(`quiz-${quizId}-player`);
         }
       } catch (error) {
         console.error("Oyuncu doğrulanırken bir hata oluştu:", error);
-        localStorage.removeItem(`quiz-${quizId}-player`); // Hata durumunda da temizle
+        localStorage.removeItem(`quiz-${quizId}-player`);
       }
     };
-
-    validateAndSetPlayer(); // Sayfa yüklenir yüklenmez oyuncu doğrulamasını başlat.
-
-    // --- Subscription ve diğer veri çekme işlemleri aynı kalabilir ---
-    const fetchQuestionDetails = async (questionId) => {
-      if (!questionId) {
-        setCurrentQuestion(null);
-        return;
-      }
-      try {
-        const questionData = await client.graphql({ query: queries.getQuestion, variables: { id: questionId } });
-        setCurrentQuestion(questionData.data.getQuestion);
-      } catch (error) { console.error("Soru detayları çekilirken hata:", error); }
-    };
-
-    const sub = client.graphql({ query: subscriptions.onUpdateQuiz, variables: { filter: { id: { eq: quizId } } } })
-      .subscribe({
-        next: ({ data }) => {
-          const updatedQuiz = data.onUpdateQuiz;
-          setQuizState(updatedQuiz);
-          fetchQuestionDetails(updatedQuiz.currentQuestionID);
-          if (updatedQuiz.currentQuestionState === 'ASKING') {
-            setHasAnswered(false);
-            setSelectedOption(null);
-          }
-          if (updatedQuiz.currentQuestionState === 'SHOWING_LEADERBOARD') {
-            fetchLeaderboard();
-          }
-        },
-        error: (error) => console.warn(error)
-      });
-
-    const fetchInitialData = async () => {
-      try {
-        const quizData = await client.graphql({ query: queries.getQuiz, variables: { id: quizId } });
-        const initialQuiz = quizData.data.getQuiz;
-        if (initialQuiz) {
-          setQuizState(initialQuiz);
-          fetchQuestionDetails(initialQuiz.currentQuestionID);
-          if (initialQuiz.currentQuestionState === 'SHOWING_LEADERBOARD') {
-            fetchLeaderboard();
-          }
-        }
-      } catch (e) { console.error("İlk quiz verisi çekilemedi", e); }
-    }
-    fetchInitialData();
-
-    return () => sub.unsubscribe();
+    validateAndSetPlayer();
   }, [quizId]);
 
-  // handleAnswerSubmit ve render fonksiyonları aynı kalır, değişiklik gerekmez.
+  // Soru değiştiğinde cevap durumunu sıfırla
+  useEffect(() => {
+      if (quizState && quizState.currentQuestionState === 'ASKING') {
+          setHasAnswered(false);
+          setSelectedOption(null);
+      }
+  }, [quizState]);
+
+
   const handleAnswerSubmit = async (option) => {
     if (hasAnswered || !player || !currentQuestion) return;
 
-    // Gelen 'A', 'B', 'C', 'D' harfini indekse çevir (A=0, B=1, ...)
     const optionIndex = option.charCodeAt(0) - 65;
-
-    // Geçerli bir indeks olup olmadığını kontrol et
     if (optionIndex < 0 || optionIndex >= currentQuestion.options.length) {
         console.error("Geçersiz seçenek:", option);
         return;
     }
 
-    // İndeksi kullanarak doğru şıkkın tam metnini al
     const selectedOptionText = currentQuestion.options[optionIndex];
-
     setHasAnswered(true);
-    setSelectedOption(option); // Kullanıcının arayüzde seçtiği harfi sakla (örn: 'A')
+    setSelectedOption(option);
 
     try {
-      // Arka uca şıkkın tam metnini gönder
+      const ttl = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
       const answerDetails = {
           playerID: player.id,
           questionID: currentQuestion.id,
-          selectedOption: selectedOptionText
+          selectedOption: selectedOptionText,
+          ttl: ttl
       };
       await client.graphql({ query: mutations.createAnswer, variables: { input: answerDetails } });
     } catch (error) {

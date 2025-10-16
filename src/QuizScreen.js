@@ -1,102 +1,18 @@
 // src/QuizScreen.js
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useParams } from 'react-router-dom';
-import { generateClient } from 'aws-amplify/api';
-import * as subscriptions from './graphql/subscriptions';
-import * as queries from './graphql/queries';
-import { Amplify } from 'aws-amplify';
-import awsExports from './aws-exports';
-
-Amplify.configure(awsExports);
-const client = generateClient();
+import { useQuizData } from './hooks/useQuizData'; // Yeni hook'u import et
 
 const QuizScreen = () => {
   const { quizId } = useParams();
-  const [quiz, setQuiz] = useState(null);
-  const [currentQuestion, setCurrentQuestion] = useState(null);
-  const [leaderboard, setLeaderboard] = useState([]);
-
-  // --- YENİ VE VERİMLİ LİDERLİK TABLOSU FONKSİYONU ---
-  const fetchLeaderboard = async () => {
-    try {
-      console.log("QUIZSCREEN: Verimli `playersByQuizID` sorgusu deneniyor...");
-
-      // Sadece bu quiz'e ait oyuncuları, puana göre sıralanmış olarak çekiyoruz.
-      const playersData = await client.graphql({
-        query: queries.playersByQuizID, // Otomatik üretilen özel sorgu
-        variables: {
-          quizID: quizId,
-          sortDirection: 'DESC', // Puana göre azalan sıralama (en yüksek üstte)
-          limit: 5 // Sunum ekranında sadece ilk 5'i göstermek yeterli
-        }
-      });
-
-      const top5Players = playersData.data.playersByQuizID.items;
-
-      console.log("QUIZSCREEN: Veritabanından gelen en iyi 5 oyuncu:", top5Players);
-      setLeaderboard(top5Players);
-
-    } catch(e) {
-      console.error("QuizScreen `playersByQuizID` sorgusu BAŞARISIZ OLDU", e);
-    }
-  };
-
-  useEffect(() => {
-    const fetchInitialQuizData = async () => {
-      try {
-        const quizData = await client.graphql({ query: queries.getQuiz, variables: { id: quizId } });
-        const initialQuiz = quizData.data.getQuiz;
-        setQuiz(initialQuiz);
-        // Eğer başlangıçta liderlik tablosu gösteriliyorsa veriyi çek
-        if (initialQuiz && initialQuiz.currentQuestionState === 'SHOWING_LEADERBOARD') {
-          fetchLeaderboard();
-        }
-      } catch (error) {
-        console.error("Quiz verisi çekilirken hata:", error);
-      }
-    };
-    fetchInitialQuizData();
-
-    // Quiz güncellemelerini dinle
-    const sub = client.graphql({ query: subscriptions.onUpdateQuiz, variables: { filter: { id: { eq: quizId } } } })
-        .subscribe({
-          next: ({ data }) => {
-            setQuiz(data.onUpdateQuiz);
-          },
-          error: (error) => console.warn(error)
-        });
-
-    return () => sub.unsubscribe();
-  }, [quizId]);
-
-
-  useEffect(() => {
-    // Quiz durumu değiştikçe gerekli verileri çek
-    if (quiz && quiz.currentQuestionID) {
-      const fetchQuestionDetails = async () => {
-        try {
-          const questionData = await client.graphql({ query: queries.getQuestion, variables: { id: quiz.currentQuestionID } });
-          setCurrentQuestion(questionData.data.getQuestion);
-        } catch (error) {
-          console.error("Soru detayları çekilirken hata:", error);
-        }
-      };
-      fetchQuestionDetails();
-    } else {
-      setCurrentQuestion(null);
-    }
-
-    // Liderlik tablosu aşamasına gelindiğinde veriyi yenile
-    if (quiz && quiz.currentQuestionState === 'SHOWING_LEADERBOARD') {
-      fetchLeaderboard();
-    }
-  }, [quiz]);
+  // Veri çekme ve state yönetimini hook'a devret
+  const { quizState: quiz, currentQuestion, leaderboard, loading, error } = useQuizData(quizId);
 
   const renderContent = () => {
-    if (!quiz) {
-      return <h2>Yükleniyor...</h2>;
-    }
+    if (loading) return <h2>Yükleniyor...</h2>;
+    if (error) return <h2>Bir hata oluştu. Lütfen sayfayı yenileyin.</h2>;
+    if (!quiz) return <h2>Quiz bulunamadı veya yükleniyor...</h2>;
 
     switch (quiz.currentQuestionState) {
       case 'ASKING':

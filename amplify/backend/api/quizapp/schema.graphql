@@ -60,4 +60,5 @@ type Answer @model(subscriptions: null) @auth(rules: [{ allow: public, provider:
   awardedScore: Int
   playerID: ID! @index(name: "byPlayer")
   questionID: ID! @index(name: "byQuestion")
+  ttl: AWSTimestamp
 }
