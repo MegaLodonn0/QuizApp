@@ -1,12 +1,11 @@
-// amplify/backend/function/YOUR_FUNCTION_NAME/src/index.js
+// amplify/backend/function/postAnswerProcessor/src/index.js
 
 const { DynamoDB } = require('aws-sdk');
 const https = require('https');
 const AWS = require('aws-sdk');
 const url = require('url');
 
-// Lambda'nın, projenizdeki diğer dosyalara erişimi olmadığı için,
-// kullanacağı sorgu ve mutasyonları doğrudan burada tanımlamak daha güvenilir olabilir.
+// --- GraphQL Sorguları ve Mutasyonları ---
 const getQuestion = /* GraphQL */ `
   query GetQuestion($id: ID!) {
     getQuestion(id: $id) { id questionText correctAnswer quizID options }
@@ -28,9 +27,13 @@ const updatePlayer = /* GraphQL */ `
   }
 `;
 
-// Bu helper fonksiyon, Lambda'dan AppSync'e imzalı GraphQL istekleri yapmamızı sağlar.
+// --- Yardımcı Fonksiyonlar ---
+
+/**
+ * AppSync'e imzalı GraphQL istekleri yapar.
+ */
 const callGraphQL = async (query, variables) => {
-  const endpoint = new url.URL(process.env.API_QUIZAPP_GRAPHQLAPIENDPOINTOUTPUT); // 'quizapp' yerine kendi API adınızı yazın
+  const endpoint = new url.URL(process.env.API_QUIZAPP_GRAPHQLAPIENDPOINTOUTPUT);
   const req = new AWS.HttpRequest(endpoint, process.env.AWS_REGION);
   
   req.method = 'POST';
@@ -54,87 +57,105 @@ const callGraphQL = async (query, variables) => {
   });
 };
 
-// Puan hesaplama mantığını içeren yeni yardımcı fonksiyon
-const calculateScore = (isCorrect, quiz, newAnswer) => {
-  if (!isCorrect) {
-    return 0;
-  }
+/**
+ * Gelen cevaba göre ilgili Question, Player ve Quiz verilerini çeker.
+ */
+const fetchRequiredData = async (newAnswer) => {
+    const [questionData, playerData] = await Promise.all([
+        callGraphQL(getQuestion, { id: newAnswer.questionID }),
+        callGraphQL(getPlayer, { id: newAnswer.playerID })
+    ]);
 
-  let awardedScore = quiz.baseScore || 10; // Varsayılan taban puan
+    const question = questionData.data.getQuestion;
+    const player = playerData.data.getPlayer;
 
-  // Zaman bonusu etkinse ve gerekli veriler mevcutsa bonusu hesapla
-  if (quiz.isTimeBonusEnabled && quiz.currentQuestionStartTime && newAnswer.createdAt) {
-    const answerTime = new Date(newAnswer.createdAt);
-    const questionStartTime = new Date(quiz.currentQuestionStartTime);
-    const timeDiffSeconds = (answerTime - questionStartTime) / 1000;
-
-    // Cevap süresi, belirlenen limit içindeyse bonusu uygula
-    if (timeDiffSeconds >= 0 && timeDiffSeconds < quiz.answerTimeLimit) {
-      const timeBonus = quiz.timeBonusScore * (1 - (timeDiffSeconds / quiz.answerTimeLimit));
-      awardedScore += Math.round(timeBonus);
+    if (!question || !player) {
+        throw new Error(`Soru veya Oyuncu bulunamadı! Question: ${question}, Player: ${player}`);
     }
-  }
 
-  return awardedScore;
+    if (!question.options || !Array.isArray(question.options)) {
+        throw new Error(`Soruda 'options' alanı bulunamadı veya dizi değil: ${question}`);
+    }
+
+    const quizData = await callGraphQL(getQuiz, { id: question.quizID });
+    const quiz = quizData.data.getQuiz;
+
+    if (!quiz) {
+        throw new Error(`Quiz bulunamadı! QuizID: ${question.quizID}`);
+    }
+
+    return { question, player, quiz };
 };
+
+
+/**
+ * Cevabın doğruluğuna ve zamanlamasına göre puanı hesaplar.
+ */
+const calculateScore = (isCorrect, quiz, newAnswer) => {
+    if (!isCorrect) {
+        return 0;
+    }
+
+    let awardedScore = quiz.baseScore || 10;
+
+    if (quiz.isTimeBonusEnabled && quiz.currentQuestionStartTime && newAnswer.createdAt) {
+        const answerTime = new Date(newAnswer.createdAt);
+        const questionStartTime = new Date(quiz.currentQuestionStartTime);
+        const timeDiffSeconds = (answerTime - questionStartTime) / 1000;
+
+        if (timeDiffSeconds >= 0 && timeDiffSeconds < quiz.answerTimeLimit) {
+            const timeBonus = quiz.timeBonusScore * (1 - (timeDiffSeconds / quiz.answerTimeLimit));
+            awardedScore += Math.round(timeBonus);
+        }
+    }
+    return awardedScore;
+};
+
+/**
+ * Oyuncunun toplam skorunu günceller.
+ */
+const updatePlayerScore = async (player, awardedScore) => {
+    const newTotalScore = player.score + awardedScore;
+    const updatePlayerInput = { id: player.id, score: newTotalScore };
+    const updateResult = await callGraphQL(updatePlayer, { input: updatePlayerInput });
+    console.log('Oyuncu başarıyla güncellendi:', updateResult.data.updatePlayer);
+};
+
+
+// --- Ana Lambda Handler ---
 
 exports.handler = async (event) => {
   console.log(`EVENT: ${JSON.stringify(event)}`);
 
   for (const record of event.Records) {
-    if (record.eventName === 'INSERT') {
-      const newAnswer = DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
+    if (record.eventName !== 'INSERT') {
+      continue;
+    }
 
-      try {
-        console.log('Yeni cevap alındı:', newAnswer);
+    const newAnswer = DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
 
-        const [questionData, playerData] = await Promise.all([
-          callGraphQL(getQuestion, { id: newAnswer.questionID }),
-          callGraphQL(getPlayer, { id: newAnswer.playerID })
-        ]);
-        
-        const question = questionData.data.getQuestion;
-        const player = playerData.data.getPlayer;
+    try {
+      console.log('Yeni cevap alındı:', newAnswer);
 
-        if (!question || !player) {
-          console.error('Soru veya Oyuncu bulunamadı!', { question, player });
-          continue;
-        }
+      // 1. Gerekli verileri çek
+      const { question, player, quiz } = await fetchRequiredData(newAnswer);
 
-        // `options` alanı olmadan gelen eski sorularla uyumluluk için kontrol
-        if (!question.options || !Array.isArray(question.options)) {
-            console.error('Soruda `options` alanı bulunamadı veya dizi değil.', question);
-            continue;
-        }
+      // 2. Cevabın doğruluğunu kontrol et
+      const correctOptionIndex = question.options.indexOf(question.correctAnswer);
+      const selectedOptionIndex = question.options.indexOf(newAnswer.selectedOption);
+      const isCorrect = correctOptionIndex !== -1 && correctOptionIndex === selectedOptionIndex;
 
-        const quizData = await callGraphQL(getQuiz, { id: question.quizID });
-        const quiz = quizData.data.getQuiz;
-        if (!quiz) {
-            console.error('Quiz bulunamadı!');
-            continue;
-        }
+      // 3. Puanı hesapla
+      const awardedScore = calculateScore(isCorrect, quiz, newAnswer);
+      console.log(`Hesaplanan Puan: ${awardedScore}, Doğru mu: ${isCorrect}`);
 
-        // Cevabın doğruluğunu metin yerine indekse göre kontrol et
-        const correctOptionIndex = question.options.indexOf(question.correctAnswer);
-        const selectedOptionIndex = question.options.indexOf(newAnswer.selectedOption);
-
-        const isCorrect = correctOptionIndex !== -1 && correctOptionIndex === selectedOptionIndex;
-
-        const awardedScore = calculateScore(isCorrect, quiz, newAnswer);
-
-        console.log(`Hesaplanan Puan: ${awardedScore}, Doğru mu: ${isCorrect}`);
-
-        // Sadece puan kazanıldıysa oyuncuyu güncelle
-        if (awardedScore > 0) {
-            const newTotalScore = player.score + awardedScore;
-            const updatePlayerInput = { id: player.id, score: newTotalScore };
-            const updateResult = await callGraphQL(updatePlayer, { input: updatePlayerInput });
-            console.log('Oyuncu başarıyla güncellendi:', updateResult.data.updatePlayer);
-        }
-
-      } catch (error) {
-        console.error('Puanlama sırasında hata:', error);
+      // 4. Gerekliyse oyuncunun skorunu güncelle
+      if (awardedScore > 0) {
+        await updatePlayerScore(player, awardedScore);
       }
+
+    } catch (error) {
+      console.error('Puanlama sırasında bir hata oluştu:', error.message);
     }
   }
   return Promise.resolve('Successfully processed DynamoDB record');
