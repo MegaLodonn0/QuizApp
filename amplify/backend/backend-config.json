@@ -1,0 +1,65 @@
+{
+  "api": {
+    "quizapp": {
+      "dependsOn": [],
+      "output": {
+        "authConfig": {
+          "additionalAuthenticationProviders": [],
+          "defaultAuthentication": {
+            "apiKeyConfig": {
+              "apiKeyExpirationDate": "2026-10-05T12:51:02.686Z",
+              "apiKeyExpirationDays": 365,
+              "description": "Quiz App Public Access"
+            },
+            "authenticationType": "API_KEY"
+          }
+        }
+      },
+      "providerPlugin": "awscloudformation",
+      "service": "AppSync"
+    }
+  },
+  "function": {
+    "postAnswerProcessor": {
+      "build": true,
+      "dependsOn": [
+        {
+          "attributes": [
+            "GraphQLAPIIdOutput",
+            "GraphQLAPIEndpointOutput",
+            "GraphQLAPIKeyOutput"
+          ],
+          "category": "api",
+          "resourceName": "quizapp"
+        }
+      ],
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda",
+      "trigger": {
+        "Answer": {
+          "effect": "INSERT",
+          "stream": "NEW_IMAGE",
+          "table": "Answer"
+        }
+      }
+    }
+  },
+  "parameters": {
+    "AMPLIFY_function_postAnswerProcessor_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "postAnswerProcessor"
+        }
+      ]
+    },
+    "AMPLIFY_function_postAnswerProcessor_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "postAnswerProcessor"
+        }
+      ]
+    }
+  }
+}

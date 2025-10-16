@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "serviceConfiguration": {
+    "apiName": "quizapp",
+    "serviceName": "AppSync",
+    "defaultAuthType": {
+      "mode": "API_KEY",
+      "expirationTime": 365,
+      "apiKeyExpirationDate": "2026-10-05T12:51:02.686Z",
+      "keyDescription": "Quiz App Public Access"
+    },
+    "conflictResolution": {},
+    "additionalAuthTypes": []
+  }
+}

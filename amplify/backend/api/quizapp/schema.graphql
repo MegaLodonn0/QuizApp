@@ -1,0 +1,63 @@
+# This "input" configures a global authorization rule to enable public access to
+# all models in this schema. Learn more about authorization rules here: https://docs.amplify.aws/cli/graphql/authorization-rules
+input AMPLIFY { globalAuthRule: AuthRule = { allow: public } } # FOR TESTING ONLY!
+
+enum QuizStatus {
+  PENDING
+  ACTIVE
+  FINISHED
+}
+
+enum QuestionState {
+  HIDDEN
+  ASKING
+  REVEALING_ANSWER
+  SHOWING_LEADERBOARD
+}
+
+type Quiz @model @auth(rules: [{ allow: public, provider: apiKey }]) { # <-- GÜNCELLENDİ
+  id: ID!
+  name: String!
+  status: QuizStatus! @default(value: "PENDING")
+  currentQuestionID: ID
+  currentQuestionState: QuestionState @default(value: "HIDDEN")
+  currentQuestionNumber: Int @default(value: "0")
+  questions: [Question] @hasMany(indexName: "byQuiz", fields: ["id"])
+  players: [Player] @hasMany(indexName: "byQuiz", fields: ["id"])
+  isTimeBonusEnabled: Boolean! @default(value: "false")
+  baseScore: Int! @default(value: "10")
+  timeBonusScore: Int! @default(value: "10")
+  answerTimeLimit: Int! @default(value: "30")
+  currentQuestionStartTime: AWSDateTime
+}
+
+type Question @model @auth(rules: [{ allow: public, provider: apiKey }]) { # <-- GÜNCELLENDİ
+  id: ID!
+  questionText: String!
+  options: [String]!
+  correctAnswer: String!
+  quizID: ID! @index(name: "byQuiz")
+  answers: [Answer] @hasMany(indexName: "byQuestion", fields: ["id"])
+}
+
+type Player @model @auth(rules: [{ allow: public, provider: apiKey }]) {
+  id: ID!
+  nickname: String!
+  score: Int! @default(value: "0")
+  quizID: ID! @index(
+    name: "byQuiz",
+    queryField: "playersByQuizID",
+    sortKeyFields: ["score"]
+  )
+  answers: [Answer] @hasMany(indexName: "byPlayer", fields: ["id"])
+}
+
+type Answer @model(subscriptions: null) @auth(rules: [{ allow: public, provider: apiKey }]) { # <-- GÜNCELLENDİ
+  id: ID!
+  selectedOption: String!
+  isCorrect: Boolean
+  responseTime: Int
+  awardedScore: Int
+  playerID: ID! @index(name: "byPlayer")
+  questionID: ID! @index(name: "byQuestion")
+}

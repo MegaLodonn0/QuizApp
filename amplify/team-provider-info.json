@@ -1,0 +1,26 @@
+{
+  "dev": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-quizapp-dev-745d1-authRole",
+      "UnauthRoleArn": "arn:aws:iam::179685449151:role/amplify-quizapp-dev-745d1-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::179685449151:role/amplify-quizapp-dev-745d1-authRole",
+      "Region": "eu-west-1",
+      "DeploymentBucketName": "amplify-quizapp-dev-745d1-deployment",
+      "UnauthRoleName": "amplify-quizapp-dev-745d1-unauthRole",
+      "StackName": "amplify-quizapp-dev-745d1",
+      "StackId": "arn:aws:cloudformation:eu-west-1:179685449151:stack/amplify-quizapp-dev-745d1/dac2a690-9f5d-11f0-85de-023cf1084595",
+      "AmplifyAppId": "dbrfm8ui0vk7w"
+    },
+    "categories": {
+      "api": {
+        "quizapp": {}
+      },
+      "function": {
+        "postAnswerProcessor": {
+          "deploymentBucketName": "amplify-quizapp-dev-745d1-deployment",
+          "s3Key": "amplify-builds/postAnswerProcessor-687775686a5a53784765-build.zip"
+        }
+      }
+    }
+  }
+}

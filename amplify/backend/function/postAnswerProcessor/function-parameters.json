@@ -1,0 +1,26 @@
+{
+  "lambdaLayers": [],
+  "permissions": {
+    "api": {
+      "quizapp": [
+        "Query",
+        "Mutation",
+        "Subscription"
+      ]
+    },
+    "storage": {
+      "Quiz:@model(appsync)": [
+        "read"
+      ],
+      "Question:@model(appsync)": [
+        "read"
+      ],
+      "Player:@model(appsync)": [
+        "update"
+      ],
+      "Answer:@model(appsync)": [
+        "update"
+      ]
+    }
+  }
+}
