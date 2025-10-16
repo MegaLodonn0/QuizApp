@@ -9,7 +9,7 @@ const url = require('url');
 // kullanacağı sorgu ve mutasyonları doğrudan burada tanımlamak daha güvenilir olabilir.
 const getQuestion = /* GraphQL */ `
   query GetQuestion($id: ID!) {
-    getQuestion(id: $id) { id questionText correctAnswer quizID }
+    getQuestion(id: $id) { id questionText correctAnswer quizID options }
   }
 `;
 const getQuiz = /* GraphQL */ `
@@ -54,6 +54,30 @@ const callGraphQL = async (query, variables) => {
   });
 };
 
+// Puan hesaplama mantığını içeren yeni yardımcı fonksiyon
+const calculateScore = (isCorrect, quiz, newAnswer) => {
+  if (!isCorrect) {
+    return 0;
+  }
+
+  let awardedScore = quiz.baseScore || 10; // Varsayılan taban puan
+
+  // Zaman bonusu etkinse ve gerekli veriler mevcutsa bonusu hesapla
+  if (quiz.isTimeBonusEnabled && quiz.currentQuestionStartTime && newAnswer.createdAt) {
+    const answerTime = new Date(newAnswer.createdAt);
+    const questionStartTime = new Date(quiz.currentQuestionStartTime);
+    const timeDiffSeconds = (answerTime - questionStartTime) / 1000;
+
+    // Cevap süresi, belirlenen limit içindeyse bonusu uygula
+    if (timeDiffSeconds >= 0 && timeDiffSeconds < quiz.answerTimeLimit) {
+      const timeBonus = quiz.timeBonusScore * (1 - (timeDiffSeconds / quiz.answerTimeLimit));
+      awardedScore += Math.round(timeBonus);
+    }
+  }
+
+  return awardedScore;
+};
+
 exports.handler = async (event) => {
   console.log(`EVENT: ${JSON.stringify(event)}`);
 
@@ -77,6 +101,12 @@ exports.handler = async (event) => {
           continue;
         }
 
+        // `options` alanı olmadan gelen eski sorularla uyumluluk için kontrol
+        if (!question.options || !Array.isArray(question.options)) {
+            console.error('Soruda `options` alanı bulunamadı veya dizi değil.', question);
+            continue;
+        }
+
         const quizData = await callGraphQL(getQuiz, { id: question.quizID });
         const quiz = quizData.data.getQuiz;
         if (!quiz) {
@@ -84,28 +114,23 @@ exports.handler = async (event) => {
             continue;
         }
 
-        let awardedScore = 0;
-        const isCorrect = newAnswer.selectedOption === question.correctAnswer;
-        
-        if (isCorrect) {
-          awardedScore = quiz.baseScore || 10;
-          if (quiz.isTimeBonusEnabled && quiz.currentQuestionStartTime) {
-            const answerTime = new Date(newAnswer.createdAt);
-            const questionStartTime = new Date(quiz.currentQuestionStartTime);
-            const timeDiffSeconds = (answerTime - questionStartTime) / 1000;
+        // Cevabın doğruluğunu metin yerine indekse göre kontrol et
+        const correctOptionIndex = question.options.indexOf(question.correctAnswer);
+        const selectedOptionIndex = question.options.indexOf(newAnswer.selectedOption);
 
-            if (timeDiffSeconds >= 0 && timeDiffSeconds < quiz.answerTimeLimit) {
-              const timeBonus = quiz.timeBonusScore * (1 - (timeDiffSeconds / quiz.answerTimeLimit));
-              awardedScore += Math.round(timeBonus);
-            }
-          }
-        }
+        const isCorrect = correctOptionIndex !== -1 && correctOptionIndex === selectedOptionIndex;
+
+        const awardedScore = calculateScore(isCorrect, quiz, newAnswer);
+
         console.log(`Hesaplanan Puan: ${awardedScore}, Doğru mu: ${isCorrect}`);
 
-        const newTotalScore = player.score + awardedScore;
-        const updatePlayerInput = { id: player.id, score: newTotalScore };
-        const updateResult = await callGraphQL(updatePlayer, { input: updatePlayerInput });
-        console.log('Oyuncu başarıyla güncellendi:', updateResult.data.updatePlayer);
+        // Sadece puan kazanıldıysa oyuncuyu güncelle
+        if (awardedScore > 0) {
+            const newTotalScore = player.score + awardedScore;
+            const updatePlayerInput = { id: player.id, score: newTotalScore };
+            const updateResult = await callGraphQL(updatePlayer, { input: updatePlayerInput });
+            console.log('Oyuncu başarıyla güncellendi:', updateResult.data.updatePlayer);
+        }
 
       } catch (error) {
         console.error('Puanlama sırasında hata:', error);

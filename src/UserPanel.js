@@ -139,13 +139,29 @@ const UserPanel = () => {
   // handleAnswerSubmit ve render fonksiyonları aynı kalır, değişiklik gerekmez.
   const handleAnswerSubmit = async (option) => {
     if (hasAnswered || !player || !currentQuestion) return;
-    const optionIndex = ['A', 'B', 'C', 'D'].indexOf(option);
-    if (optionIndex === -1) return;
+
+    // Gelen 'A', 'B', 'C', 'D' harfini indekse çevir (A=0, B=1, ...)
+    const optionIndex = option.charCodeAt(0) - 65;
+
+    // Geçerli bir indeks olup olmadığını kontrol et
+    if (optionIndex < 0 || optionIndex >= currentQuestion.options.length) {
+        console.error("Geçersiz seçenek:", option);
+        return;
+    }
+
+    // İndeksi kullanarak doğru şıkkın tam metnini al
     const selectedOptionText = currentQuestion.options[optionIndex];
+
     setHasAnswered(true);
-    setSelectedOption(option);
+    setSelectedOption(option); // Kullanıcının arayüzde seçtiği harfi sakla (örn: 'A')
+
     try {
-      const answerDetails = { playerID: player.id, questionID: currentQuestion.id, selectedOption: selectedOptionText };
+      // Arka uca şıkkın tam metnini gönder
+      const answerDetails = {
+          playerID: player.id,
+          questionID: currentQuestion.id,
+          selectedOption: selectedOptionText
+      };
       await client.graphql({ query: mutations.createAnswer, variables: { input: answerDetails } });
     } catch (error) {
       console.error("Cevap gönderilirken hata:", error);
