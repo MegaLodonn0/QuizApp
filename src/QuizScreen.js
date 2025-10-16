@@ -107,7 +107,7 @@ const QuizScreen = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '2em', marginTop: '40px' }}>
                 {currentQuestion.options.map((opt, index) => (
                     <div key={opt} style={{ padding: '20px', backgroundColor: `rgb(${[ '231, 76, 60', '52, 152, 219', '241, 196, 15', '46, 204, 113'][index]})`, color: 'white', borderRadius: '5px' }}>
-                      {opt}
+                      {`${String.fromCharCode(65 + index)}. ${opt}`}
                     </div>
                 ))}
               </div>
